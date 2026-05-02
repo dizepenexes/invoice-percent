@@ -85,20 +85,36 @@ async function getCroppedImageByPoints(
     return new Blob();
   }
 
-  canvas.width = cropWidth;
-  canvas.height = cropHeight;
+  const scale = 3;
 
-  context.drawImage(
-    image,
-    minX,
-    minY,
-    cropWidth,
-    cropHeight,
-    0,
-    0,
-    cropWidth,
-    cropHeight
-  );
+canvas.width = cropWidth * scale;
+canvas.height = cropHeight * scale;
+
+context.drawImage(
+  image,
+  minX,
+  minY,
+  cropWidth,
+  cropHeight,
+  0,
+  0,
+  canvas.width,
+  canvas.height
+);
+
+const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+const data = imageData.data;
+
+for (let i = 0; i < data.length; i += 4) {
+  const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+  const contrast = gray > 145 ? 255 : 0;
+
+  data[i] = contrast;
+  data[i + 1] = contrast;
+  data[i + 2] = contrast;
+}
+
+context.putImageData(imageData, 0, 0);
 
   return new Promise((resolve) => {
     canvas.toBlob((blob) => {
@@ -182,12 +198,16 @@ export default function Home() {
 
     try {
       const response = await Tesseract.recognize(image, "eng", {
-        logger: (message) => {
-          if (message.status === "recognizing text") {
-            setProgress(Math.round(message.progress * 100));
-          }
-        },
-      });
+  logger: (message: any) => {
+    if (message.status === "recognizing text") {
+      setProgress(Math.round(message.progress * 100));
+    }
+  },
+  config: {
+    tessedit_char_whitelist: "0123456789.,",
+    tessedit_pageseg_mode: "6",
+  },
+} as any);
 
       const foundAmounts = extractAmounts(response.data.text);
       setAmounts(foundAmounts);
