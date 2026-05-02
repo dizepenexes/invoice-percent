@@ -153,7 +153,7 @@ for (let y = 0; y < height; y++) {
     }
   }
 
-  if (blackPixels > width * 0.60) {
+  if (blackPixels > width * 0.45) {
     for (let x = 0; x < width; x++) {
       const index = (y * width + x) * 4;
 
@@ -175,7 +175,7 @@ for (let x = 0; x < width; x++) {
     }
   }
 
-  if (blackPixels > height * 0.60) {
+  if (blackPixels > height * 0.45) {
     for (let y = 0; y < height; y++) {
       const index = (y * width + x) * 4;
 
