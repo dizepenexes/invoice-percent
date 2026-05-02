@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import Cropper, { Area } from "react-easy-crop";
+import { useRef, useState } from "react";
 import Tesseract from "tesseract.js";
 
 type AmountRow = {
@@ -15,6 +14,11 @@ type ResultRow = {
   result: number;
   percent: number;
   weight?: number;
+};
+
+type Point = {
+  x: number;
+  y: number;
 };
 
 function extractAmounts(text: string): AmountRow[] {
@@ -43,7 +47,7 @@ function calculateWithPercent(amounts: AmountRow[], percent: number): ResultRow[
     .filter((item) => !Number.isNaN(item.original));
 }
 
-async function getCroppedImage(imageSrc: string, cropArea: Area): Promise<Blob> {
+async function getImageSize(imageSrc: string) {
   const image = new Image();
   image.src = imageSrc;
 
@@ -52,6 +56,28 @@ async function getCroppedImage(imageSrc: string, cropArea: Area): Promise<Blob> 
     image.onerror = () => reject();
   });
 
+  return image;
+}
+
+async function getCroppedImageByPoints(
+  imageSrc: string,
+  points: Point[],
+  displayWidth: number,
+  displayHeight: number
+): Promise<Blob> {
+  const image = await getImageSize(imageSrc);
+
+  const scaleX = image.naturalWidth / displayWidth;
+  const scaleY = image.naturalHeight / displayHeight;
+
+  const minX = Math.min(...points.map((point) => point.x)) * scaleX;
+  const minY = Math.min(...points.map((point) => point.y)) * scaleY;
+  const maxX = Math.max(...points.map((point) => point.x)) * scaleX;
+  const maxY = Math.max(...points.map((point) => point.y)) * scaleY;
+
+  const cropWidth = maxX - minX;
+  const cropHeight = maxY - minY;
+
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
 
@@ -59,19 +85,19 @@ async function getCroppedImage(imageSrc: string, cropArea: Area): Promise<Blob> 
     return new Blob();
   }
 
-  canvas.width = cropArea.width;
-  canvas.height = cropArea.height;
+  canvas.width = cropWidth;
+  canvas.height = cropHeight;
 
   context.drawImage(
     image,
-    cropArea.x,
-    cropArea.y,
-    cropArea.width,
-    cropArea.height,
+    minX,
+    minY,
+    cropWidth,
+    cropHeight,
     0,
     0,
-    cropArea.width,
-    cropArea.height
+    cropWidth,
+    cropHeight
   );
 
   return new Promise((resolve) => {
@@ -84,12 +110,12 @@ async function getCroppedImage(imageSrc: string, cropArea: Area): Promise<Blob> 
 }
 
 export default function Home() {
+  const imageWrapperRef = useRef<HTMLDivElement | null>(null);
+
   const [imagePreview, setImagePreview] = useState<string>("");
   const [croppedImagePreview, setCroppedImagePreview] = useState<string>("");
-  const [cropArea, setCropArea] = useState<Area | null>(null);
-
-  const [crop, setCrop] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
+  const [points, setPoints] = useState<Point[]>([]);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
 
   const [amounts, setAmounts] = useState<AmountRow[]>([]);
   const [results, setResults] = useState<ResultRow[]>([]);
@@ -100,6 +126,15 @@ export default function Home() {
   const [weight, setWeight] = useState("");
   const [weightPercent, setWeightPercent] = useState("23");
 
+  function initializePoints(width: number, height: number) {
+    setPoints([
+      { x: width * 0.15, y: height * 0.15 },
+      { x: width * 0.85, y: height * 0.15 },
+      { x: width * 0.85, y: height * 0.85 },
+      { x: width * 0.15, y: height * 0.85 },
+    ]);
+  }
+
   function handleImageChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
 
@@ -109,13 +144,33 @@ export default function Home() {
 
     setImagePreview(previewUrl);
     setCroppedImagePreview("");
-    setCropArea(null);
-    setCrop({ x: 0, y: 0 });
-    setZoom(1);
+    setPoints([]);
     setAmounts([]);
     setResults([]);
     setIsConfirmed(false);
     setProgress(0);
+  }
+
+  function handleImageLoad(event: React.SyntheticEvent<HTMLImageElement>) {
+    const width = event.currentTarget.clientWidth;
+    const height = event.currentTarget.clientHeight;
+
+    initializePoints(width, height);
+  }
+
+  function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    if (dragIndex === null || !imageWrapperRef.current) return;
+
+    const rect = imageWrapperRef.current.getBoundingClientRect();
+
+    const x = Math.min(Math.max(event.clientX - rect.left, 0), rect.width);
+    const y = Math.min(Math.max(event.clientY - rect.top, 0), rect.height);
+
+    setPoints((currentPoints) =>
+      currentPoints.map((point, index) =>
+        index === dragIndex ? { x, y } : point
+      )
+    );
   }
 
   async function recognizeImage(image: Blob) {
@@ -144,28 +199,41 @@ export default function Home() {
   }
 
   async function handleCropAndRecognize() {
-    if (!imagePreview || !cropArea) {
-      alert("Спочатку оберіть область для розпізнавання.");
+    if (!imagePreview || points.length !== 4 || !imageWrapperRef.current) {
+      alert("Спочатку виставте 4 кути навколо стовпчика.");
       return;
     }
 
-    const croppedBlob = await getCroppedImage(imagePreview, cropArea);
-    const croppedUrl = URL.createObjectURL(croppedBlob);
+    const rect = imageWrapperRef.current.getBoundingClientRect();
 
+    const croppedBlob = await getCroppedImageByPoints(
+      imagePreview,
+      points,
+      rect.width,
+      rect.height
+    );
+
+    const croppedUrl = URL.createObjectURL(croppedBlob);
     setCroppedImagePreview(croppedUrl);
+
     await recognizeImage(croppedBlob);
   }
 
   function updateAmount(id: number, value: string) {
     setAmounts((currentAmounts) =>
-      currentAmounts.map((item) => (item.id === id ? { ...item, value } : item))
+      currentAmounts.map((item) =>
+        item.id === id ? { ...item, value } : item
+      )
     );
 
     setResults([]);
   }
 
   function removeAmount(id: number) {
-    setAmounts((currentAmounts) => currentAmounts.filter((item) => item.id !== id));
+    setAmounts((currentAmounts) =>
+      currentAmounts.filter((item) => item.id !== id)
+    );
+
     setResults([]);
   }
 
@@ -243,8 +311,8 @@ export default function Home() {
             </h1>
 
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Завантажте фото, обріжте потрібний стовпчик із сумами, перевірте
-              значення і додайте потрібний відсоток.
+              Завантажте фото, виставте 4 кути навколо стовпчика із сумами,
+              перевірте значення і додайте потрібний відсоток.
             </p>
           </div>
 
@@ -265,45 +333,67 @@ export default function Home() {
           {imagePreview && !amounts.length && !isRecognizing && (
             <section className="mt-5">
               <h2 className="mb-3 text-xl font-bold text-slate-950">
-                Обріжте стовпчик із сумами
+                Виділіть стовпчик із сумами
               </h2>
 
-              <div className="relative h-[420px] overflow-hidden rounded-[1.5rem] border border-white/60 bg-black shadow-inner">
-                <Cropper
-                  image={imagePreview}
-                  crop={crop}
-                  zoom={zoom}
-                  aspect={1 / 2}
-                  onCropChange={setCrop}
-                  onZoomChange={setZoom}
-                  onCropComplete={(_, croppedAreaPixels) =>
-                    setCropArea(croppedAreaPixels)
-                  }
-                />
-              </div>
+              <p className="mb-3 text-sm text-slate-600">
+                Потягніть сині точки за кути потрібної області.
+              </p>
 
-              <div className="mt-4 rounded-2xl border border-white/70 bg-white/60 p-4 shadow-sm backdrop-blur-xl">
-                <label className="block text-sm font-semibold text-slate-700">
-                  Масштаб
-                </label>
-
-                <input
-                  type="range"
-                  min={1}
-                  max={4}
-                  step={0.1}
-                  value={zoom}
-                  onChange={(event) => setZoom(Number(event.target.value))}
-                  className="mt-3 w-full"
+              <div
+                ref={imageWrapperRef}
+                onPointerMove={handlePointerMove}
+                onPointerUp={() => setDragIndex(null)}
+                onPointerLeave={() => setDragIndex(null)}
+                className="relative overflow-hidden rounded-[1.5rem] border border-white/60 bg-black shadow-inner touch-none"
+              >
+                <img
+                  src={imagePreview}
+                  alt="Фото накладної"
+                  onLoad={handleImageLoad}
+                  className="block w-full select-none"
+                  draggable={false}
                 />
 
-                <button
-                  onClick={handleCropAndRecognize}
-                  className="mt-4 w-full rounded-2xl bg-blue-500 px-5 py-3 font-bold text-white shadow-lg shadow-blue-500/25 transition active:scale-95"
-                >
-                  Розпізнати обрізаний стовпчик
-                </button>
+                {points.length === 4 && (
+                  <>
+                    <svg className="pointer-events-none absolute inset-0 h-full w-full">
+                      <polygon
+                        points={points
+                          .map((point) => `${point.x},${point.y}`)
+                          .join(" ")}
+                        fill="rgba(59, 130, 246, 0.18)"
+                        stroke="rgba(59, 130, 246, 0.95)"
+                        strokeWidth="3"
+                      />
+                    </svg>
+
+                    {points.map((point, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          setDragIndex(index);
+                        }}
+                        className="absolute h-9 w-9 -translate-x-1/2 -translate-y-1/2 rounded-full border-4 border-white bg-blue-500 shadow-lg active:scale-90"
+                        style={{
+                          left: point.x,
+                          top: point.y,
+                        }}
+                        aria-label={`Кут ${index + 1}`}
+                      />
+                    ))}
+                  </>
+                )}
               </div>
+
+              <button
+                onClick={handleCropAndRecognize}
+                className="mt-4 w-full rounded-2xl bg-blue-500 px-5 py-3 font-bold text-white shadow-lg shadow-blue-500/25 transition active:scale-95"
+              >
+                Розпізнати виділений стовпчик
+              </button>
             </section>
           )}
 
