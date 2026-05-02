@@ -22,14 +22,26 @@ type Point = {
 };
 
 function extractAmounts(text: string): AmountRow[] {
-  const matches = text.match(/\d+[.,]?\d*/g) ?? [];
+  const lines = text.split("\n");
 
-  return matches
-    .map((item, index) => ({
-      id: index + 1,
-      value: item.replace(",", "."),
-    }))
-    .filter((item) => !Number.isNaN(Number(item.value)));
+  const amounts: AmountRow[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const cleaned = lines[i]
+      .replace(/[^0-9.,]/g, "")
+      .replace(",", ".");
+
+    const match = cleaned.match(/\d+\.\d{2}/);
+
+    if (match) {
+      amounts.push({
+        id: amounts.length + 1,
+        value: match[0],
+      });
+    }
+  }
+
+  return amounts;
 }
 
 function calculateWithPercent(amounts: AmountRow[], percent: number): ResultRow[] {
@@ -205,7 +217,7 @@ export default function Home() {
   },
   config: {
     tessedit_char_whitelist: "0123456789.,",
-    tessedit_pageseg_mode: "6",
+    tessedit_pageseg_mode: "4",
   },
 } as any);
 
