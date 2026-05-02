@@ -22,21 +22,34 @@ type Point = {
 };
 
 function extractAmounts(text: string): AmountRow[] {
-  const lines = text.split("\n");
+  const parts = text
+    .split(/\s+/)
+    .map((part) =>
+      part
+        .replace(/[^0-9.,]/g, "")
+        .replace(",", ".")
+    )
+    .filter(Boolean);
 
   const amounts: AmountRow[] = [];
 
-  for (let i = 0; i < lines.length; i++) {
-    const cleaned = lines[i]
-      .replace(/[^0-9.,]/g, "")
-      .replace(",", ".");
+  for (const part of parts) {
+    let value = part;
 
-    const match = cleaned.match(/\d+\.\d{2}/);
-
-    if (match) {
+    if (/^\d+\.\d{2}$/.test(value)) {
       amounts.push({
         id: amounts.length + 1,
-        value: match[0],
+        value,
+      });
+      continue;
+    }
+
+    if (/^\d{3,6}$/.test(value)) {
+      value = `${value.slice(0, -2)}.${value.slice(-2)}`;
+
+      amounts.push({
+        id: amounts.length + 1,
+        value,
       });
     }
   }
@@ -119,7 +132,7 @@ const data = imageData.data;
 
 for (let i = 0; i < data.length; i += 4) {
   const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-  const contrast = gray > 145 ? 255 : 0;
+  const contrast = gray > 110 ? 255 : 0;
 
   data[i] = contrast;
   data[i + 1] = contrast;
@@ -217,7 +230,7 @@ export default function Home() {
   },
   config: {
     tessedit_char_whitelist: "0123456789.,",
-    tessedit_pageseg_mode: "4",
+    tessedit_pageseg_mode: "6",
   },
 } as any);
 
