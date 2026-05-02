@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Cropper, { Area } from "react-easy-crop";
 import Tesseract from "tesseract.js";
 
 type AmountRow = {
@@ -13,7 +14,7 @@ type ResultRow = {
   original: number;
   result: number;
   percent: number;
-   weight?: number;
+  weight?: number;
 };
 
 function extractAmounts(text: string): AmountRow[] {
@@ -42,8 +43,54 @@ function calculateWithPercent(amounts: AmountRow[], percent: number): ResultRow[
     .filter((item) => !Number.isNaN(item.original));
 }
 
+async function getCroppedImage(imageSrc: string, cropArea: Area): Promise<Blob> {
+  const image = new Image();
+  image.src = imageSrc;
+
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject();
+  });
+
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    return new Blob();
+  }
+
+  canvas.width = cropArea.width;
+  canvas.height = cropArea.height;
+
+  context.drawImage(
+    image,
+    cropArea.x,
+    cropArea.y,
+    cropArea.width,
+    cropArea.height,
+    0,
+    0,
+    cropArea.width,
+    cropArea.height
+  );
+
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      }
+    }, "image/jpeg");
+  });
+}
+
 export default function Home() {
   const [imagePreview, setImagePreview] = useState<string>("");
+  const [croppedImagePreview, setCroppedImagePreview] = useState<string>("");
+  const [cropArea, setCropArea] = useState<Area | null>(null);
+
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+
   const [amounts, setAmounts] = useState<AmountRow[]>([]);
   const [results, setResults] = useState<ResultRow[]>([]);
   const [isRecognizing, setIsRecognizing] = useState(false);
@@ -53,21 +100,33 @@ export default function Home() {
   const [weight, setWeight] = useState("");
   const [weightPercent, setWeightPercent] = useState("23");
 
-  async function handleImageChange(event: React.ChangeEvent<HTMLInputElement>) {
+  function handleImageChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
 
     if (!file) return;
 
     const previewUrl = URL.createObjectURL(file);
+
     setImagePreview(previewUrl);
+    setCroppedImagePreview("");
+    setCropArea(null);
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
     setAmounts([]);
     setResults([]);
     setIsConfirmed(false);
     setProgress(0);
+  }
+
+  async function recognizeImage(image: Blob) {
     setIsRecognizing(true);
+    setProgress(0);
+    setAmounts([]);
+    setResults([]);
+    setIsConfirmed(false);
 
     try {
-      const response = await Tesseract.recognize(file, "eng", {
+      const response = await Tesseract.recognize(image, "eng", {
         logger: (message) => {
           if (message.status === "recognizing text") {
             setProgress(Math.round(message.progress * 100));
@@ -84,21 +143,29 @@ export default function Home() {
     }
   }
 
+  async function handleCropAndRecognize() {
+    if (!imagePreview || !cropArea) {
+      alert("Спочатку оберіть область для розпізнавання.");
+      return;
+    }
+
+    const croppedBlob = await getCroppedImage(imagePreview, cropArea);
+    const croppedUrl = URL.createObjectURL(croppedBlob);
+
+    setCroppedImagePreview(croppedUrl);
+    await recognizeImage(croppedBlob);
+  }
+
   function updateAmount(id: number, value: string) {
     setAmounts((currentAmounts) =>
-      currentAmounts.map((item) =>
-        item.id === id ? { ...item, value } : item
-      )
+      currentAmounts.map((item) => (item.id === id ? { ...item, value } : item))
     );
 
     setResults([]);
   }
 
   function removeAmount(id: number) {
-    setAmounts((currentAmounts) =>
-      currentAmounts.filter((item) => item.id !== id)
-    );
-
+    setAmounts((currentAmounts) => currentAmounts.filter((item) => item.id !== id));
     setResults([]);
   }
 
@@ -131,36 +198,36 @@ export default function Home() {
   }
 
   function handleWeightCalculate() {
-  const parsedWeight = Number(weight.replace(",", "."));
-  const parsedPercent = Number(weightPercent.replace(",", "."));
+    const parsedWeight = Number(weight.replace(",", "."));
+    const parsedPercent = Number(weightPercent.replace(",", "."));
 
-  if (Number.isNaN(parsedWeight) || parsedWeight <= 0) {
-    alert("Введіть правильну вагу.");
-    return;
+    if (Number.isNaN(parsedWeight) || parsedWeight <= 0) {
+      alert("Введіть правильну вагу.");
+      return;
+    }
+
+    if (Number.isNaN(parsedPercent)) {
+      alert("Введіть правильний відсоток.");
+      return;
+    }
+
+    const calculatedResults = amounts
+      .map((item) => {
+        const original = Number(item.value);
+        const pricePerKg = original / parsedWeight;
+
+        return {
+          id: item.id,
+          original,
+          weight: parsedWeight,
+          percent: parsedPercent,
+          result: pricePerKg * (1 + parsedPercent / 100),
+        };
+      })
+      .filter((item) => !Number.isNaN(item.original));
+
+    setResults(calculatedResults);
   }
-
-  if (Number.isNaN(parsedPercent)) {
-    alert("Введіть правильний відсоток.");
-    return;
-  }
-
-  const calculatedResults = amounts
-    .map((item) => {
-      const original = Number(item.value);
-      const pricePerKg = original / parsedWeight;
-
-      return {
-        id: item.id,
-        original,
-        weight: parsedWeight,
-        percent: parsedPercent,
-        result: pricePerKg * (1 + parsedPercent / 100),
-      };
-    })
-    .filter((item) => !Number.isNaN(item.original));
-
-  setResults(calculatedResults);
-}
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#edf2f8] px-4 py-6 text-slate-900">
@@ -171,17 +238,13 @@ export default function Home() {
       <div className="relative mx-auto max-w-xl">
         <div className="mb-5 rounded-[2rem] border border-white/60 bg-white/45 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.12)] backdrop-blur-2xl">
           <div className="mb-5">
-            <div className="mb-3 inline-flex rounded-full border border-white/60 bg-white/50 px-3 py-1 text-xs font-semibold text-blue-700 shadow-sm backdrop-blur">
-              
-            </div>
-
             <h1 className="text-3xl font-bold tracking-tight text-slate-950">
               Розрахунок накладної
             </h1>
 
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Завантажте фото стовпчика з сумами, перевірте розпізнані значення
-              і додайте потрібний відсоток.
+              Завантажте фото, обріжте потрібний стовпчик із сумами, перевірте
+              значення і додайте потрібний відсоток.
             </p>
           </div>
 
@@ -199,11 +262,60 @@ export default function Home() {
             />
           </label>
 
-          {imagePreview && (
+          {imagePreview && !amounts.length && !isRecognizing && (
+            <section className="mt-5">
+              <h2 className="mb-3 text-xl font-bold text-slate-950">
+                Обріжте стовпчик із сумами
+              </h2>
+
+              <div className="relative h-[420px] overflow-hidden rounded-[1.5rem] border border-white/60 bg-black shadow-inner">
+                <Cropper
+                  image={imagePreview}
+                  crop={crop}
+                  zoom={zoom}
+                  aspect={1 / 2}
+                  onCropChange={setCrop}
+                  onZoomChange={setZoom}
+                  onCropComplete={(_, croppedAreaPixels) =>
+                    setCropArea(croppedAreaPixels)
+                  }
+                />
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-white/70 bg-white/60 p-4 shadow-sm backdrop-blur-xl">
+                <label className="block text-sm font-semibold text-slate-700">
+                  Масштаб
+                </label>
+
+                <input
+                  type="range"
+                  min={1}
+                  max={4}
+                  step={0.1}
+                  value={zoom}
+                  onChange={(event) => setZoom(Number(event.target.value))}
+                  className="mt-3 w-full"
+                />
+
+                <button
+                  onClick={handleCropAndRecognize}
+                  className="mt-4 w-full rounded-2xl bg-blue-500 px-5 py-3 font-bold text-white shadow-lg shadow-blue-500/25 transition active:scale-95"
+                >
+                  Розпізнати обрізаний стовпчик
+                </button>
+              </div>
+            </section>
+          )}
+
+          {croppedImagePreview && (
             <div className="mt-5 overflow-hidden rounded-[1.5rem] border border-white/60 bg-white/40 p-2 shadow-inner backdrop-blur-xl">
+              <p className="mb-2 text-sm font-semibold text-slate-700">
+                Обрізана область
+              </p>
+
               <img
-                src={imagePreview}
-                alt="Фото накладної"
+                src={croppedImagePreview}
+                alt="Обрізана область"
                 className="max-h-80 w-full rounded-[1.2rem] object-contain"
               />
             </div>
@@ -309,39 +421,40 @@ export default function Home() {
                     >
                       Додати 25%
                     </button>
-                    
                   </div>
 
                   <div className="mt-4 rounded-2xl border border-white/70 bg-white/60 p-4 shadow-sm backdrop-blur-xl">
-  <p className="mb-3 text-sm font-semibold text-slate-700">
-    Для товару на вагу
-  </p>
+                    <p className="mb-3 text-sm font-semibold text-slate-700">
+                      Для товару на вагу
+                    </p>
 
-  <div className="grid grid-cols-2 gap-2">
-    <input
-      value={weight}
-      onChange={(event) => setWeight(event.target.value)}
-      inputMode="decimal"
-      className="w-full rounded-2xl border border-white/70 bg-white/70 px-4 py-3 font-semibold shadow-inner backdrop-blur focus:outline-none focus:ring-2 focus:ring-blue-400"
-      placeholder="Вага, кг"
-    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        value={weight}
+                        onChange={(event) => setWeight(event.target.value)}
+                        inputMode="decimal"
+                        className="w-full rounded-2xl border border-white/70 bg-white/70 px-4 py-3 font-semibold shadow-inner backdrop-blur focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        placeholder="Вага, кг"
+                      />
 
-    <input
-      value={weightPercent}
-      onChange={(event) => setWeightPercent(event.target.value)}
-      inputMode="decimal"
-      className="w-full rounded-2xl border border-white/70 bg-white/70 px-4 py-3 font-semibold shadow-inner backdrop-blur focus:outline-none focus:ring-2 focus:ring-blue-400"
-      placeholder="Відсоток"
-    />
-  </div>
+                      <input
+                        value={weightPercent}
+                        onChange={(event) =>
+                          setWeightPercent(event.target.value)
+                        }
+                        inputMode="decimal"
+                        className="w-full rounded-2xl border border-white/70 bg-white/70 px-4 py-3 font-semibold shadow-inner backdrop-blur focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        placeholder="Відсоток"
+                      />
+                    </div>
 
-  <button
-    onClick={handleWeightCalculate}
-    className="mt-3 w-full rounded-2xl bg-purple-500 px-5 py-3 font-bold text-white shadow-lg shadow-purple-500/25 transition active:scale-95"
-  >
-    Поділити на вагу і додати %
-  </button>
-</div>
+                    <button
+                      onClick={handleWeightCalculate}
+                      className="mt-3 w-full rounded-2xl bg-purple-500 px-5 py-3 font-bold text-white shadow-lg shadow-purple-500/25 transition active:scale-95"
+                    >
+                      Поділити на вагу і додати %
+                    </button>
+                  </div>
 
                   <div className="mt-3 flex gap-2">
                     <input
@@ -356,7 +469,7 @@ export default function Home() {
                       onClick={handleCustomCalculate}
                       className="rounded-2xl bg-blue-500 px-5 py-3 font-bold text-white shadow-lg shadow-blue-500/25 transition active:scale-95"
                     >
-                      Додати
+                      Додати%
                     </button>
                   </div>
                 </div>
@@ -382,40 +495,41 @@ export default function Home() {
                       </span>
 
                       <div className="flex-1 text-right text-base">
-                    {item.weight ? (
-                      <>
-                        <span className="font-medium text-slate-600">
-                          {item.original.toFixed(2)} / {item.weight.toFixed(3)} кг
-                        </span>{" "}
-                    
-                        <span className="text-blue-500 font-semibold">
-                          + {item.percent}%
-                        </span>{" "}
-                    
-                        <span className="text-slate-400">→</span>{" "}
-                    
-                        <span className="text-lg font-bold text-slate-950">
-                          {item.result.toFixed(2)}
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="font-medium text-slate-600">
-                          {item.original.toFixed(2)}
-                        </span>{" "}
-                    
-                        <span className="text-blue-500 font-semibold">
-                          + {item.percent}%
-                        </span>{" "}
-                    
-                        <span className="text-slate-400">→</span>{" "}
-                    
-                        <span className="text-lg font-bold text-slate-950">
-                          {item.result.toFixed(2)}
-                        </span>
-                      </>
-                    )}
-                  </div>
+                        {item.weight ? (
+                          <>
+                            <span className="font-medium text-slate-600">
+                              {item.original.toFixed(2)} /{" "}
+                              {item.weight.toFixed(3)} кг
+                            </span>{" "}
+
+                            <span className="font-semibold text-blue-500">
+                              + {item.percent}%
+                            </span>{" "}
+
+                            <span className="text-slate-400">→</span>{" "}
+
+                            <span className="text-lg font-bold text-slate-950">
+                              {item.result.toFixed(2)}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="font-medium text-slate-600">
+                              {item.original.toFixed(2)}
+                            </span>{" "}
+
+                            <span className="font-semibold text-blue-500">
+                              + {item.percent}%
+                            </span>{" "}
+
+                            <span className="text-slate-400">→</span>{" "}
+
+                            <span className="text-lg font-bold text-slate-950">
+                              {item.result.toFixed(2)}
+                            </span>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
