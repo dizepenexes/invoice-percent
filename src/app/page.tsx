@@ -22,34 +22,47 @@ type Point = {
 };
 
 function extractAmounts(text: string): AmountRow[] {
-  const parts = text
-    .split(/\s+/)
-    .map((part) =>
-      part
-        .replace(/[^0-9.,]/g, "")
-        .replace(",", ".")
-    )
-    .filter(Boolean);
-
+  const lines = text.split(/\n+/);
   const amounts: AmountRow[] = [];
 
-  for (const part of parts) {
-    let value = part;
+  for (const line of lines) {
+    const cleanedLine = line
+      .replace(/,/g, ".")
+      .replace(/[^0-9.\s]/g, " ")
+      .trim();
 
-    if (/^\d+\.\d{2}$/.test(value)) {
+    const decimalMatch = cleanedLine.match(/\d+\.\d{2}/);
+
+    if (decimalMatch) {
       amounts.push({
         id: amounts.length + 1,
-        value,
+        value: decimalMatch[0],
       });
       continue;
     }
 
-    if (/^\d{3,6}$/.test(value)) {
-      value = `${value.slice(0, -2)}.${value.slice(-2)}`;
+    const groups = cleanedLine.match(/\d+/g);
+
+    if (!groups) continue;
+
+    if (groups.length >= 2 && groups[groups.length - 1].length === 2) {
+      const wholePart = groups.slice(0, -1).join("");
+      const decimalPart = groups[groups.length - 1];
 
       amounts.push({
         id: amounts.length + 1,
-        value,
+        value: `${wholePart}.${decimalPart}`,
+      });
+
+      continue;
+    }
+
+    if (groups.length === 1 && /^\d{3,6}$/.test(groups[0])) {
+      const value = groups[0];
+
+      amounts.push({
+        id: amounts.length + 1,
+        value: `${value.slice(0, -2)}.${value.slice(-2)}`,
       });
     }
   }
@@ -264,33 +277,53 @@ export default function Home() {
   }
 
   async function recognizeImage(image: Blob) {
-    setIsRecognizing(true);
-    setProgress(0);
-    setAmounts([]);
-    setResults([]);
-    setIsConfirmed(false);
+  setIsRecognizing(true);
+  setProgress(0);
+  setAmounts([]);
+  setResults([]);
+  setIsConfirmed(false);
 
-    try {
-      const response = await Tesseract.recognize(image, "eng", {
-  logger: (message: any) => {
-    if (message.status === "recognizing text") {
-      setProgress(Math.round(message.progress * 100));
-    }
-  },
-  config: {
-    tessedit_char_whitelist: "0123456789.,",
-    tessedit_pageseg_mode: "6",
-  },
-} as any);
+  try {
+    const commonOptions = {
+      logger: (message: any) => {
+        if (message.status === "recognizing text") {
+          setProgress(Math.round(message.progress * 100));
+        }
+      },
+      config: {
+        tessedit_char_whitelist: "0123456789.,",
+      },
+    } as any;
 
-      const foundAmounts = extractAmounts(response.data.text);
-      setAmounts(foundAmounts);
-    } catch {
-      alert("Не вдалося розпізнати фото. Спробуйте зробити чіткіше фото.");
-    } finally {
-      setIsRecognizing(false);
-    }
+    const responseMode6 = await Tesseract.recognize(image, "eng", {
+      ...commonOptions,
+      config: {
+        ...commonOptions.config,
+        tessedit_pageseg_mode: "6",
+      },
+    } as any);
+
+    const responseMode11 = await Tesseract.recognize(image, "eng", {
+      ...commonOptions,
+      config: {
+        ...commonOptions.config,
+        tessedit_pageseg_mode: "11",
+      },
+    } as any);
+
+    const amountsMode6 = extractAmounts(responseMode6.data.text);
+    const amountsMode11 = extractAmounts(responseMode11.data.text);
+
+    const foundAmounts =
+      amountsMode11.length > amountsMode6.length ? amountsMode11 : amountsMode6;
+
+    setAmounts(foundAmounts);
+  } catch {
+    alert("Не вдалося розпізнати фото. Спробуйте зробити чіткіше фото.");
+  } finally {
+    setIsRecognizing(false);
   }
+}
 
   async function handleCropAndRecognize() {
     if (!imagePreview || points.length !== 4 || !imageWrapperRef.current) {
