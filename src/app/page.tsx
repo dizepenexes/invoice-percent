@@ -132,7 +132,7 @@ const data = imageData.data;
 
 for (let i = 0; i < data.length; i += 4) {
   const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-  const contrast = gray > 120 ? 255 : 0;
+  const contrast = gray > 105 ? 255 : 0;
 
   data[i] = contrast;
   data[i + 1] = contrast;
@@ -153,7 +153,7 @@ for (let y = 0; y < height; y++) {
     }
   }
 
-  if (blackPixels > width * 0.45) {
+  if (blackPixels > width * 0.60) {
     for (let x = 0; x < width; x++) {
       const index = (y * width + x) * 4;
 
@@ -175,7 +175,7 @@ for (let x = 0; x < width; x++) {
     }
   }
 
-  if (blackPixels > height * 0.45) {
+  if (blackPixels > height * 0.60) {
     for (let y = 0; y < height; y++) {
       const index = (y * width + x) * 4;
 
