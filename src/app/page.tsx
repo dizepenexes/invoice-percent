@@ -132,12 +132,61 @@ const data = imageData.data;
 
 for (let i = 0; i < data.length; i += 4) {
   const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-  const contrast = gray > 110 ? 255 : 0;
+  const contrast = gray > 120 ? 255 : 0;
 
   data[i] = contrast;
   data[i + 1] = contrast;
   data[i + 2] = contrast;
 }
+
+const width = canvas.width;
+const height = canvas.height;
+
+for (let y = 0; y < height; y++) {
+  let blackPixels = 0;
+
+  for (let x = 0; x < width; x++) {
+    const index = (y * width + x) * 4;
+
+    if (data[index] === 0) {
+      blackPixels++;
+    }
+  }
+
+  if (blackPixels > width * 0.45) {
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+
+      data[index] = 255;
+      data[index + 1] = 255;
+      data[index + 2] = 255;
+    }
+  }
+}
+
+for (let x = 0; x < width; x++) {
+  let blackPixels = 0;
+
+  for (let y = 0; y < height; y++) {
+    const index = (y * width + x) * 4;
+
+    if (data[index] === 0) {
+      blackPixels++;
+    }
+  }
+
+  if (blackPixels > height * 0.45) {
+    for (let y = 0; y < height; y++) {
+      const index = (y * width + x) * 4;
+
+      data[index] = 255;
+      data[index + 1] = 255;
+      data[index + 2] = 255;
+    }
+  }
+}
+
+context.putImageData(imageData, 0, 0);
 
 context.putImageData(imageData, 0, 0);
 
